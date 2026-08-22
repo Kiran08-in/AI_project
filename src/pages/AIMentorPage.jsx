@@ -3,7 +3,8 @@ import { useLocation } from "react-router-dom";
 import { useData } from "../components/Common/DataContext";
 import { LoadingSpinner } from "../components/Common/LoadingSpinner";
 import { ErrorMessage, SuccessMessage } from "../components/Common/Messages";
-import { aiTaskTypes, buildMockAIResponse, mockModelName } from "../data/mockData";
+import { aiTaskTypes } from "../data/mockData";
+import { generateAIPlan } from "../services/api";
 
 // Renders one section of the structured AI response.
 function AISection({ title, items }) {
@@ -24,7 +25,7 @@ function AISection({ title, items }) {
 }
 
 export default function AIMentorPage() {
-  const { projects, createTask, addAIInteraction } = useData();
+  const { projects, createTask } = useData();
   const location = useLocation();
 
   // If navigated from Project Details, pre-select that project.
@@ -55,31 +56,28 @@ export default function AIMentorPage() {
     }
 
     setLoading(true);
-    // Simulate the AI thinking. Later this calls POST /api/ai/plan.
-    setTimeout(() => {
-      const mock = buildMockAIResponse(requirement.trim(), taskType);
-      setResponse(mock);
-      setLoading(false);
-    }, 1400);
+    generateAIPlan({
+      projectId: Number(projectId),
+      aiTaskType: taskType,
+      requirement: requirement.trim(),
+    })
+      .then(setResponse)
+      .catch((requestError) =>
+        setError(
+          requestError.response?.data?.detail ||
+            "The AI recommendation could not be generated."
+        )
+      )
+      .finally(() => setLoading(false));
   };
 
   const handleSave = () => {
     if (!response) return;
-    const project = projects.find((p) => p.id === Number(projectId));
-    addAIInteraction({
-      projectId: Number(projectId),
-      projectName: project?.name || "—",
-      taskType,
-      userPrompt: requirement.trim(),
-      responsePreview: requirement.trim().slice(0, 90) + "...",
-      modelName: mockModelName,
-      fullResponse: response,
-    });
     setSuccess("Recommendation saved to AI History.");
   };
 
   // Turn each AI task suggestion into a real task in the selected project.
-  const handleCreateTasks = () => {
+  const handleCreateTasks = async () => {
     if (!response) return;
     const projectIdNum = Number(projectId);
     // Use the frontend task lines as concrete tasks.
@@ -88,16 +86,14 @@ export default function AIMentorPage() {
       ...(response.backendTasks || []),
       ...(response.databaseTasks || []),
     ];
-    lines.forEach((line) => {
-      createTask({
+    await Promise.all(lines.map((line) => createTask({
         projectId: projectIdNum,
         title: line.length > 70 ? line.slice(0, 67) + "..." : line,
         description: line,
         priority: "Medium",
         status: "Pending",
         aiGenerated: true,
-      });
-    });
+      })));
     setSuccess(`${lines.length} tasks created from the recommendation.`);
   };
 
@@ -174,8 +170,7 @@ export default function AIMentorPage() {
           </form>
 
           <p className="form-hint" style={{ marginTop: "var(--space-3)" }}>
-            The AI Mentor uses mock data for now. When the Python backend is ready,
-            this will call <code>POST /api/ai/plan</code>.
+            The AI Mentor saves generated recommendations to the backend history.
           </p>
         </div>
 
@@ -211,7 +206,7 @@ export default function AIMentorPage() {
           {!loading && response && (
             <>
               <div className="flex-between" style={{ marginBottom: "var(--space-4)" }}>
-                <span className="badge badge--ai">Model: {mockModelName}</span>
+                <span className="badge badge--ai">Model: {response.modelName}</span>
                 <span className="text-sm muted">{taskType}</span>
               </div>
 

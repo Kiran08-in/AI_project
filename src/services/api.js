@@ -1,127 +1,412 @@
-// ===========================================================
-// AI Project Mentor — Axios API service
-// This file prepares reusable functions for the future
-// Python (FastAPI) backend. While VITE_USE_MOCK_DATA is "true",
-// the app uses src/data/mockData.js instead of these calls.
-//
-// To switch to the real backend later:
-//   1. Set VITE_USE_MOCK_DATA=false in your .env file.
-//   2. Make sure VITE_API_BASE_URL points to your FastAPI server.
-//   3. The functions below will then be called by the pages.
-//
-// IMPORTANT: Never put AI API keys or database credentials here.
-// Those belong only in the Python backend.
-// ===========================================================
-
 import axios from "axios";
+import {
+  mockProjects,
+  mockTasks,
+  mockAIHistory,
+} from "../data/mockData";
 
-// Read backend URL from the environment. Falls back to local dev URL.
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+// Base configuration for the future FastAPI backend.
+const baseURL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-// Whether the app should use mock data instead of real API calls.
-export const USE_MOCK_DATA =
-  String(import.meta.env.VITE_USE_MOCK_DATA ?? "true").toLowerCase() === "true";
+// When true the app uses mock data; when false it calls the real backend.
+const useMock =
+  String(import.meta.env.VITE_USE_MOCK_DATA ?? "false").toLowerCase() === "true";
 
-// Shared axios instance so every request uses the same base URL.
 const apiClient = axios.create({
-  baseURL: BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
+  baseURL,
+  headers: { "Content-Type": "application/json" },
   timeout: 15000,
 });
 
-// ---------- Backend health ----------
+// Helper to simulate network latency for mock responses.
+const delay = (ms = 300) => new Promise((res) => setTimeout(res, ms));
 
+// In-memory stores so mock CRUD stays consistent during a session.
+let projects = [...mockProjects];
+let tasks = [...mockTasks];
+let interactions = [...mockAIHistory];
+
+const nextId = (list) => (list.length ? Math.max(...list.map((x) => x.id)) + 1 : 1);
+
+function mapProject(project) {
+  return {
+    id: project.project_id,
+    name: project.project_name,
+    description: project.description,
+    techStack: project.technology_stack
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+    createdAt: project.created_at,
+  };
+}
+
+function toProjectRequest(project) {
+  return {
+    project_name: project.name,
+    description: project.description,
+    technology_stack: Array.isArray(project.techStack)
+      ? project.techStack.join(", ")
+      : project.techStack,
+  };
+}
+
+function mapTask(task) {
+  return {
+    id: task.task_id,
+    projectId: task.project_id,
+    title: task.title,
+    description: task.description,
+    priority: task.priority,
+    status: task.status,
+    aiGenerated: task.ai_generated,
+    createdAt: task.created_at,
+    updatedAt: task.updated_at,
+  };
+}
+
+function toTaskRequest(task) {
+  return {
+    project_id: Number(task.projectId),
+    title: task.title,
+    description: task.description,
+    priority: task.priority,
+    status: task.status,
+    ai_generated: task.aiGenerated,
+  };
+}
+
+function mapInteraction(interaction) {
+  return {
+    id: interaction.interaction_id,
+    projectId: interaction.project_id,
+    aiTaskType: interaction.task_type,
+    userPrompt: interaction.prompt,
+    response: mapAIPlanResponse(interaction),
+    responseText: interaction.ai_response,
+    modelName: interaction.model_name,
+    createdAt: interaction.created_at,
+  };
+}
+
+function toAIPlanRequest(request) {
+  return {
+    project_id: Number(request.projectId),
+    task_type: request.aiTaskType,
+    prompt: request.requirement,
+  };
+}
+
+function mapAIPlanResponse(interaction) {
+  const sectionNames = [
+    "Requirement Understanding",
+    "Frontend Tasks",
+    "Backend Tasks",
+    "Database Tasks",
+    "Testing Steps",
+    "Possible Blockers",
+    "Recommended Next Action",
+  ];
+  const sections = {};
+  const answer = interaction.ai_response
+    .replace(/\*\*/g, "")
+    .replace(/\r\n/g, "\n");
+  const sectionPattern = new RegExp(
+    `(?:^|\\n)\\s*\\d+\\.\\s*(${sectionNames.join("|")})\\s*:?[ \\t]*([\\s\\S]*?)(?=\\n?\\s*\\d+\\.\\s*(?:${sectionNames.join("|")})\\s*:?[ \\t]*|$)`,
+    "g"
+  );
+  let match;
+
+  while ((match = sectionPattern.exec(answer)) !== null) {
+    const key = match[1]
+      .replace(/(?:^| )([A-Z])/g, (_, letter) => letter.toLowerCase())
+      .replace(/ /g, "");
+    const lines = match[2]
+      .split("\n")
+      .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
+      .filter(Boolean);
+    sections[key] = ["Frontend Tasks", "Backend Tasks", "Database Tasks", "Testing Steps", "Possible Blockers"].includes(match[1])
+      ? lines
+      : lines.join(" ");
+  }
+
+  return {
+    ...sections,
+    interactionId: interaction.interaction_id,
+    projectId: interaction.project_id,
+    taskType: interaction.task_type,
+    prompt: interaction.prompt,
+    responseText: interaction.ai_response,
+    modelName: interaction.model_name,
+    createdAt: interaction.created_at,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
 export async function checkBackendHealth() {
-  const res = await apiClient.get("/api/health");
-  return res.data;
+  if (useMock) {
+    await delay(150);
+    return { status: "ok", mock: true };
+  }
+  const { data } = await apiClient.get("/api/health");
+  return data;
 }
 
-// ---------- Dashboard ----------
-
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
 export async function getDashboardStatistics() {
-  const res = await apiClient.get("/api/dashboard");
-  return res.data;
+  if (useMock) {
+    await delay();
+    const completed = tasks.filter((t) => t.status === "Completed").length;
+    const inProgress = tasks.filter((t) => t.status === "In Progress").length;
+    const pending = tasks.filter((t) => t.status === "Pending").length;
+    return {
+      totalProjects: projects.length,
+      totalTasks: tasks.length,
+      pendingTasks: pending,
+      inProgressTasks: inProgress,
+      completedTasks: completed,
+    };
+  }
+  const { data } = await apiClient.get("/api/dashboard");
+  return data;
 }
 
-// ---------- Projects ----------
-
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
 export async function getProjects() {
-  const res = await apiClient.get("/api/projects");
-  return res.data;
+  if (useMock) {
+    await delay();
+    return [...projects];
+  }
+  const { data } = await apiClient.get("/api/projects");
+  return data.map(mapProject);
 }
 
 export async function getProjectById(projectId) {
-  const res = await apiClient.get(`/api/projects/${projectId}`);
-  return res.data;
+  if (useMock) {
+    await delay();
+    return projects.find((p) => p.id === Number(projectId)) || null;
+  }
+  const { data } = await apiClient.get(`/api/projects/${projectId}`);
+  return mapProject(data);
 }
 
 export async function createProject(projectData) {
-  const res = await apiClient.post("/api/projects", projectData);
-  return res.data;
+  if (useMock) {
+    await delay();
+    const project = {
+      id: nextId(projects),
+      createdAt: new Date().toISOString().slice(0, 10),
+      ...projectData,
+    };
+    projects = [...projects, project];
+    return project;
+  }
+  const { data } = await apiClient.post(
+    "/api/projects",
+    toProjectRequest(projectData)
+  );
+  return mapProject(data);
 }
 
 export async function updateProject(projectId, projectData) {
-  const res = await apiClient.put(`/api/projects/${projectId}`, projectData);
-  return res.data;
+  if (useMock) {
+    await delay();
+    projects = projects.map((p) =>
+      p.id === Number(projectId) ? { ...p, ...projectData } : p
+    );
+    return projects.find((p) => p.id === Number(projectId));
+  }
+  const { data } = await apiClient.put(
+    `/api/projects/${projectId}`,
+    toProjectRequest(projectData)
+  );
+  return mapProject(data);
 }
 
 export async function deleteProject(projectId) {
-  const res = await apiClient.delete(`/api/projects/${projectId}`);
-  return res.data;
+  if (useMock) {
+    await delay();
+    projects = projects.filter((p) => p.id !== Number(projectId));
+    tasks = tasks.filter((t) => t.projectId !== Number(projectId));
+    return { success: true };
+  }
+  await apiClient.delete(`/api/projects/${projectId}`);
+  return { success: true };
 }
 
-// ---------- Tasks ----------
-
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
 export async function getTasks() {
-  const res = await apiClient.get("/api/tasks");
-  return res.data;
-}
-
-export async function getTaskById(taskId) {
-  const res = await apiClient.get(`/api/tasks/${taskId}`);
-  return res.data;
+  if (useMock) {
+    await delay();
+    return [...tasks];
+  }
+  const { data } = await apiClient.get("/api/tasks");
+  return data.map(mapTask);
 }
 
 export async function createTask(taskData) {
-  const res = await apiClient.post("/api/tasks", taskData);
-  return res.data;
+  if (useMock) {
+    await delay();
+    const task = {
+      id: nextId(tasks),
+      createdAt: new Date().toISOString().slice(0, 10),
+      updatedAt: new Date().toISOString().slice(0, 10),
+      ...taskData,
+    };
+    tasks = [...tasks, task];
+    return task;
+  }
+  const { data } = await apiClient.post(
+    "/api/tasks",
+    toTaskRequest(taskData)
+  );
+  return mapTask(data);
 }
 
 export async function updateTask(taskId, taskData) {
-  const res = await apiClient.put(`/api/tasks/${taskId}`, taskData);
-  return res.data;
+  if (useMock) {
+    await delay();
+    tasks = tasks.map((t) =>
+      t.id === Number(taskId)
+        ? { ...t, ...taskData, updatedAt: new Date().toISOString().slice(0, 10) }
+        : t
+    );
+    return tasks.find((t) => t.id === Number(taskId));
+  }
+  const { data } = await apiClient.put(
+    `/api/tasks/${taskId}`,
+    toTaskRequest(taskData)
+  );
+  return mapTask(data);
 }
 
 export async function updateTaskStatus(taskId, status) {
-  const res = await apiClient.patch(`/api/tasks/${taskId}/status`, { status });
-  return res.data;
+  if (useMock) {
+    await delay(150);
+    tasks = tasks.map((t) =>
+      t.id === Number(taskId)
+        ? { ...t, status, updatedAt: new Date().toISOString().slice(0, 10) }
+        : t
+    );
+    return tasks.find((t) => t.id === Number(taskId));
+  }
+  const { data } = await apiClient.patch(`/api/tasks/${taskId}/status`, { status });
+  return mapTask(data);
 }
 
 export async function deleteTask(taskId) {
-  const res = await apiClient.delete(`/api/tasks/${taskId}`);
-  return res.data;
+  if (useMock) {
+    await delay();
+    tasks = tasks.filter((t) => t.id !== Number(taskId));
+    return { success: true };
+  }
+  await apiClient.delete(`/api/tasks/${taskId}`);
+  return { success: true };
 }
 
-// ---------- AI Mentor ----------
-
+// ---------------------------------------------------------------------------
+// AI
+// ---------------------------------------------------------------------------
 export async function generateAIPlan(requestData) {
-  const res = await apiClient.post("/api/ai/plan", requestData);
-  return res.data;
-}
-
-export async function recommendNextTask(requestData) {
-  const res = await apiClient.post("/api/ai/next-task", requestData);
-  return res.data;
+  if (useMock) {
+    await delay(900);
+    return buildMockAIResponse(requestData);
+  }
+  const { data } = await apiClient.post(
+    "/api/ai/plan",
+    toAIPlanRequest(requestData)
+  );
+  return mapAIPlanResponse(data);
 }
 
 export async function getAIHistory(projectId) {
-  const url = projectId
-    ? `/api/ai/history/${projectId}`
-    : "/api/ai/history";
-  const res = await apiClient.get(url);
-  return res.data;
+  if (useMock) {
+    await delay();
+    if (projectId) {
+      return interactions.filter((i) => i.projectId === Number(projectId));
+    }
+    return [...interactions];
+  }
+  const url = projectId ? `/api/ai/history/${projectId}` : "/api/ai/history";
+  const { data } = await apiClient.get(url);
+  return data.map(mapInteraction);
 }
 
-export { BASE_URL };
+export async function deleteAIInteraction(interactionId) {
+  if (useMock) {
+    await delay();
+    interactions = interactions.filter((i) => i.id !== Number(interactionId));
+    return { success: true };
+  }
+  await apiClient.delete(`/api/ai/history/${interactionId}`);
+  return { success: true };
+}
+
+export async function saveAIInteraction(interaction) {
+  if (useMock) {
+    await delay();
+    const record = {
+      id: nextId(interactions),
+      createdAt: new Date().toISOString().slice(0, 10),
+      modelName: "GPT-OSS",
+      ...interaction,
+    };
+    interactions = [record, ...interactions];
+    return record;
+  }
+  const { data } = await apiClient.post("/api/ai/history", {
+    project_id: Number(interaction.projectId),
+    task_type: interaction.taskType,
+    prompt: interaction.userPrompt,
+    ai_response: interaction.responseText || JSON.stringify(interaction.fullResponse || interaction.response),
+    model_name: interaction.modelName,
+  });
+  return mapInteraction(data);
+}
+
+// ---------------------------------------------------------------------------
+// Mock AI response generator (frontend-only placeholder)
+// ---------------------------------------------------------------------------
+function buildMockAIResponse({ aiTaskType, requirement, projectName }) {
+  const label = aiTaskType || "Break Requirement into Tasks";
+  return {
+    requirementUnderstanding: `For the "${projectName || "selected"}" project, the AI mentor interpreted the request as: ${requirement || "general project guidance"}. Task type: ${label}.`,
+    frontendTasks: [
+      "Create a responsive page for the requested feature.",
+      "Add form validation and loading states.",
+      "Display success and error messages to the user.",
+    ],
+    backendTasks: [
+      "Add a FastAPI endpoint with input validation.",
+      "Return structured JSON the frontend can render.",
+      "Log errors for debugging.",
+    ],
+    databaseTasks: [
+      "Create the required table with primary key.",
+      "Add indexes for frequently queried columns.",
+      "Use parameterised queries to prevent SQL injection.",
+    ],
+    testingSteps: [
+      "Write unit tests for the endpoint.",
+      "Test the form with empty and invalid input.",
+      "Verify the feature works end to end in the browser.",
+    ],
+    possibleBlockers: [
+      "Backend may not be running during development.",
+      "Database schema may still be changing.",
+      "AI model responses can vary between calls.",
+    ],
+    recommendedNextAction:
+      "Start with the backend endpoint, then build the frontend form, and finish with tests.",
+  };
+}
+
+export { useMock };

@@ -57,13 +57,13 @@ export default function TasksPage() {
     setShowForm(true);
   };
 
-  const handleSave = (data) => {
+  const handleSave = async (data) => {
     try {
       if (editing) {
-        updateTask(editing.id, data);
+        await updateTask(editing.id, data);
         setSuccess("Task updated successfully.");
       } else {
-        createTask(data);
+        await createTask(data);
         setSuccess("Task created successfully.");
       }
       setShowForm(false);
@@ -73,7 +73,7 @@ export default function TasksPage() {
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (confirmId == null) return;
     deleteTask(confirmId);
     setSuccess("Task deleted successfully.");

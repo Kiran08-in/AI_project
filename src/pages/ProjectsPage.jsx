@@ -31,13 +31,13 @@ export default function ProjectsPage() {
     setShowForm(true);
   };
 
-  const handleSave = (data) => {
+  const handleSave = async (data) => {
     try {
       if (editing) {
-        updateProject(editing.id, data);
+        await updateProject(editing.id, data);
         setSuccess("Project updated successfully.");
       } else {
-        createProject(data);
+        await createProject(data);
         setSuccess("Project created successfully.");
       }
       setShowForm(false);
@@ -47,10 +47,10 @@ export default function ProjectsPage() {
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (confirmId == null) return;
     try {
-      deleteProject(confirmId);
+      await deleteProject(confirmId);
       setSuccess("Project deleted successfully.");
     } catch {
       setError("Project could not be deleted. Please try again.");

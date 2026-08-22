@@ -60,9 +60,9 @@ export default function ProjectDetailsPage() {
     navigate("/ai-mentor", { state: { projectId: project.id } });
   };
 
-  const handleDeleteProject = () => {
+  const handleDeleteProject = async () => {
     try {
-      deleteProject(project.id);
+      await deleteProject(project.id);
       navigate("/projects");
     } catch {
       setError("Project could not be deleted. Please try again.");
@@ -70,9 +70,9 @@ export default function ProjectDetailsPage() {
     setConfirmDeleteProject(false);
   };
 
-  const handleDeleteTask = () => {
+  const handleDeleteTask = async () => {
     if (confirmDeleteTaskId == null) return;
-    deleteTask(confirmDeleteTaskId);
+    await deleteTask(confirmDeleteTaskId);
     setSuccess("Task deleted successfully.");
     setConfirmDeleteTaskId(null);
   };
@@ -215,8 +215,8 @@ export default function ProjectDetailsPage() {
         <ProjectForm
           title="Edit Project"
           initial={project}
-          onSave={(data) => {
-            updateProject(project.id, data);
+          onSave={async (data) => {
+            await updateProject(project.id, data);
             setShowEdit(false);
             setSuccess("Project updated successfully.");
           }}
@@ -228,8 +228,8 @@ export default function ProjectDetailsPage() {
         <TaskForm
           title="Add Task"
           projects={[project]}
-          onSave={(data) => {
-            createTask(data);
+          onSave={async (data) => {
+            await createTask(data);
             setShowTaskForm(false);
             setSuccess("Task added successfully.");
           }}

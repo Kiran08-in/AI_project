@@ -1,87 +1,94 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
-  mockProjects,
-  mockTasks,
-  mockAIHistory,
-} from "../../data/mockData";
+  createProject as createProjectRequest,
+  createTask as createTaskRequest,
+  deleteAIInteraction as deleteAIInteractionRequest,
+  deleteProject as deleteProjectRequest,
+  deleteTask as deleteTaskRequest,
+  getAIHistory,
+  getProjects,
+  getTasks,
+  saveAIInteraction,
+  updateProject as updateProjectRequest,
+  updateTask as updateTaskRequest,
+  updateTaskStatus as updateTaskStatusRequest,
+} from "../../services/api";
 
 const DataContext = createContext(null);
 
-// This provider holds all projects, tasks and AI interactions in React state.
-// For now it is seeded from mock data. When the FastAPI backend is ready,
-// replace the inline operations below with calls to src/services/api.js.
 export function DataProvider({ children }) {
-  const [projects, setProjects] = useState(mockProjects);
-  const [tasks, setTasks] = useState(mockTasks);
-  const [aiHistory, setAiHistory] = useState(mockAIHistory);
+  const [projects, setProjects] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [aiHistory, setAiHistory] = useState([]);
+
+  useEffect(() => {
+    Promise.all([getProjects(), getTasks(), getAIHistory()]).then(
+      ([loadedProjects, loadedTasks, loadedHistory]) => {
+        setProjects(loadedProjects);
+        setTasks(loadedTasks);
+        setAiHistory(loadedHistory);
+      }
+    );
+  }, []);
 
   // ---- Project helpers ----
-  const createProject = (data) => {
-    const id = projects.reduce((m, p) => Math.max(m, p.id), 0) + 1;
-    const today = new Date().toISOString().slice(0, 10);
-    const project = { id, createdAt: today, ...data };
+  const createProject = async (data) => {
+    const project = await createProjectRequest(data);
     setProjects((prev) => [project, ...prev]);
     return project;
   };
 
-  const updateProject = (id, data) => {
+  const updateProject = async (id, data) => {
+    const project = await updateProjectRequest(id, data);
     setProjects((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...data } : p))
+      prev.map((item) => (item.id === id ? project : item))
     );
+    return project;
   };
 
-  const deleteProject = (id) => {
+  const deleteProject = async (id) => {
+    await deleteProjectRequest(id);
     setProjects((prev) => prev.filter((p) => p.id !== id));
     setTasks((prev) => prev.filter((t) => t.projectId !== id));
   };
 
   // ---- Task helpers ----
-  const createTask = (data) => {
-    const id = tasks.reduce((m, t) => Math.max(m, t.id), 0) + 1;
-    const today = new Date().toISOString().slice(0, 10);
-    const task = {
-      id,
-      createdAt: today,
-      updatedAt: today,
-      aiGenerated: false,
-      ...data,
-    };
+  const createTask = async (data) => {
+    const task = await createTaskRequest(data);
     setTasks((prev) => [task, ...prev]);
     return task;
   };
 
-  const updateTask = (id, data) => {
-    const today = new Date().toISOString().slice(0, 10);
+  const updateTask = async (id, data) => {
+    const task = await updateTaskRequest(id, data);
     setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, ...data, updatedAt: today } : t
-      )
+      prev.map((item) => (item.id === id ? task : item))
     );
+    return task;
   };
 
-  const updateTaskStatus = (id, status) => {
-    const today = new Date().toISOString().slice(0, 10);
+  const updateTaskStatus = async (id, status) => {
+    const task = await updateTaskStatusRequest(id, status);
     setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, status, updatedAt: today } : t
-      )
+      prev.map((item) => (item.id === id ? task : item))
     );
+    return task;
   };
 
-  const deleteTask = (id) => {
+  const deleteTask = async (id) => {
+    await deleteTaskRequest(id);
     setTasks((prev) => prev.filter((t) => t.id !== id));
   };
 
   // ---- AI history helpers ----
-  const addAIInteraction = (interaction) => {
-    const id = aiHistory.reduce((m, h) => Math.max(m, h.id), 0) + 1;
-    const today = new Date().toISOString().slice(0, 10);
-    const record = { id, createdAt: today, ...interaction };
+  const addAIInteraction = async (interaction) => {
+    const record = await saveAIInteraction(interaction);
     setAiHistory((prev) => [record, ...prev]);
     return record;
   };
 
-  const deleteAIInteraction = (id) => {
+  const deleteAIInteraction = async (id) => {
+    await deleteAIInteractionRequest(id);
     setAiHistory((prev) => prev.filter((h) => h.id !== id));
   };
 
